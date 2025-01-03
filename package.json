@@ -9,6 +9,8 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "appwrite": "^16.1.0",
+    "node-appwrite": "^14.1.0",
     "stellar-sdk": "^13.1.0"
   }
 }

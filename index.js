@@ -1,9 +1,14 @@
-const { Worker, isMainThread, parentPort } = require('worker_threads');
+const {Worker, isMainThread, parentPort} = require('worker_threads');
 const StellarSdk = require('stellar-sdk');
 
-function generateVanityAddress(prefix = "", suffix = "", workerId) {
+const numThreads = 1;
+const updateRate = 100000;
+const prefix = "GCEUR";
+const suffix = "GZC";
+
+function generateVanityAddress(prefix = "", suffix = "", id) {
     let attempts = 0;
-    const startTime = Date.now(); // Запускаем таймер
+    const startTime = Date.now();
     while (true) {
         attempts++;
         const keypair = StellarSdk.Keypair.random();
@@ -11,7 +16,7 @@ function generateVanityAddress(prefix = "", suffix = "", workerId) {
 
         if (address.startsWith(prefix) && address.endsWith(suffix)) {
             parentPort.postMessage({
-                workerId,
+                id,
                 attempts,
                 address,
                 secret: keypair.secret()
@@ -19,81 +24,57 @@ function generateVanityAddress(prefix = "", suffix = "", workerId) {
             break;
         }
 
-        if (attempts % 5000 === 0) {
-            const elapsedTime = (Date.now() - startTime) / 1000; // Время в секундах
-            const generationSpeed = attempts / elapsedTime; // Количество попыток в секунду
+        if (attempts % updateRate === 0) {
+            const elapsedTime = (Date.now() - startTime) / 1000;
+            const generationSpeed = attempts / elapsedTime;
             parentPort.postMessage({
-                workerId,
+                id,
                 attempts,
-                generationSpeed
+                generationSpeed,
+                elapsedTime
             });
         }
     }
 }
 
-// Функция для расчета вероятности, времени нахождения и прогресса
 function calculateVanityAddressStats(prefixLength, suffixLength, generationSpeed, currentAttempts) {
-    const base = 32; // Количество возможных символов в Stellar-адресе
+    const base = 32;
     const totalLength = prefixLength + suffixLength;
-
-    // Вычисляем вероятность нахождения нужного адреса
-    const probability = Math.pow(base, -totalLength); // 1 / 32^(prefixLength + suffixLength)
-
-    // Ожидаемое количество попыток
+    const probability = Math.pow(base, -totalLength);
     const expectedAttempts = Math.pow(base, totalLength);
-
-    // Время в секундах для нахождения адреса с учетом скорости генерации
     const timeInSeconds = expectedAttempts / generationSpeed;
     const timeInHours = timeInSeconds / (60 * 60);
-
-    // Рассчитываем прогресс
-    const progress = ((currentAttempts / expectedAttempts) * 100).toFixed(5);
-
-    // Форматируем вероятность в проценты с 6 знаками после запятой
-    const formattedProbability = (probability * 100).toFixed(15);
-
-    // Форматируем время в часы с 2 знаками после запятой
-    const formattedTimeInHours = timeInHours.toFixed(1);
-
     return {
-        formattedProbability,
+        formattedProbability: (probability * 100).toFixed(15),
         expectedAttempts,
-        formattedTimeInHours,
-        progress
+        formattedTimeInHours: timeInHours.toFixed(1),
+        progress: ((currentAttempts / expectedAttempts) * 100).toFixed(5)
     };
 }
 
 if (isMainThread) {
-    const numThreads = 10;
     const threads = [];
     const threadAttempts = Array(numThreads).fill(0);
     const started = Date.now();
-    const prefix = "GCGZC";
-    const suffix = "GZC";
     let totalGenerationSpeed = 0;
 
-    for (let i = 0; i < numThreads; i++) {
+    for (let id = 0; id < numThreads; id++) {
         const worker = new Worker(__filename);
         worker.on('message', (msg) => {
             if (msg.address) {
                 process.stdout.cursorTo(0, numThreads + 9);
-
                 console.log(`Публичный ключ: ${msg.address}`);
                 console.log(`Приватный ключ: ${msg.secret}`);
                 console.log(`Завершено`, (Date.now() - started) / 1000);
-
                 process.exit();
             }
 
             if (msg.attempts) {
-                threadAttempts[msg.workerId] = msg.attempts;
+                threadAttempts[msg.id] = msg.attempts;
                 let threadAttemptsCount = threadAttempts.reduce((accumulator, currentValue) => accumulator + currentValue, 0);
                 totalGenerationSpeed = threadAttemptsCount / ((Date.now() - started) / 1000); // Рассчитываем общую скорость генерации
 
                 let stats = calculateVanityAddressStats(prefix.length, suffix.length, totalGenerationSpeed, threadAttemptsCount);
-
-                process.stdout.cursorTo(0, 8 + msg.workerId);
-                process.stdout.write(`Поток ${msg.workerId + 1}: ${msg.attempts.toLocaleString()}`);
 
                 process.stdout.cursorTo(0, 2);
                 process.stdout.write(`Сложность: ${stats.expectedAttempts.toLocaleString()} адресов`);
@@ -102,25 +83,30 @@ if (isMainThread) {
                 process.stdout.write(`Вероятность: ${stats.formattedProbability}%`);
 
                 process.stdout.cursorTo(0, 4);
-                process.stdout.write(`Ожидаемое время: ${stats.formattedTimeInHours} ч.`);
+                process.stdout.write(`Ожидаемое время (часы): ${stats.formattedTimeInHours} ч.`);
 
                 process.stdout.cursorTo(0, 5);
                 process.stdout.write(`Общие попытки: ${threadAttemptsCount.toLocaleString()}`);
 
                 process.stdout.cursorTo(0, 6);
                 process.stdout.write(`Прогресс: ${stats.progress}%`);
+
+                process.stdout.cursorTo(0, 7);
+                process.stdout.write(`Время (секунды): ${msg.elapsedTime.toLocaleString()}`);
+
+                process.stdout.cursorTo(0, 8);
+                process.stdout.write(`Скорость генерации (адреса / сек): ${parseInt((threadAttemptsCount / msg.elapsedTime)).toLocaleString()}`);
+
+                process.stdout.cursorTo(0, 10 + msg.id);
+                process.stdout.write(`Поток ${msg.id + 1}: ${msg.attempts.toLocaleString()}`);
             }
         });
 
-        worker.postMessage({
-            prefix: prefix,
-            suffix: suffix,
-            workerId: i
-        });
+        worker.postMessage({prefix, suffix, id});
         threads.push(worker);
     }
 } else {
     parentPort.on('message', (msg) => {
-        generateVanityAddress(msg.prefix, msg.suffix, msg.workerId);
+        generateVanityAddress(msg.prefix, msg.suffix, msg.id);
     });
 }

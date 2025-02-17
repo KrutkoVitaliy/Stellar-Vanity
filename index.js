@@ -1,10 +1,10 @@
 const {Worker, isMainThread, parentPort} = require('worker_threads');
 const StellarSdk = require('stellar-sdk');
 
-const numThreads = 1;
-const updateRate = 100000;
-const prefix = "GCEUR";
-const suffix = "GZC";
+const numThreads = 8;
+const updateRate = 12500;
+const prefix = "GAME";
+const suffix = "PLAY";
 
 function generateVanityAddress(prefix = "", suffix = "", id) {
     let attempts = 0;

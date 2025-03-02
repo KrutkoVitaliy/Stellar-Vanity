@@ -3,8 +3,8 @@ const StellarSdk = require('stellar-sdk');
 
 const numThreads = 8;
 const updateRate = 12500;
-const prefix = "GAME";
-const suffix = "PLAY";
+const prefix = "GCAT";
+const suffix = "LIDIA";
 
 function generateVanityAddress(prefix = "", suffix = "", id) {
     let attempts = 0;
